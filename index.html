@@ -1,48 +1,65 @@
 <!doctype html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>Truck Road Dodge</title>
+<meta charset="utf-8" />
+<title>Truck Road Dodge — Safe Edition</title>
 <style>
-  body { background:#88c0d0; margin:0; font-family:sans-serif; }
-  #hud { position:absolute; top:10px; left:10px; color:white;
-         background:rgba(0,0,0,0.5); padding:10px 14px; border-radius:8px; }
-  canvas { display:block; margin:60px auto; background:#7faac9;
-           border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.4); }
+  body { background:#85b5d0; margin:0; font-family:sans-serif; }
+  #hud {
+    position:absolute; top:10px; left:10px;
+    background:rgba(0,0,0,0.55); color:white;
+    padding:10px 14px; border-radius:8px; font-weight:600;
+  }
+  canvas {
+    display:block; margin:70px auto; background:#79a7c6;
+    border-radius:10px; box-shadow:0 0 14px rgba(0,0,0,0.4);
+  }
+  button { margin-left:8px; }
 </style>
 </head>
 <body>
 
 <div id="hud">
-  Bottles: <span id="bottles">0</span> &nbsp; | &nbsp;
+  Bottles: <span id="bottles">0</span> |
   Metres: <span id="meters">0</span>
+  <button id="restart">Restart</button>
 </div>
 
-<canvas id="game" width="900" height="450"></canvas>
+<canvas id="game" width="900" height="470"></canvas>
 
 <script>
+/*
+  Safe Edition:
+  - "Kids" replaced with cardboard "cutouts" (non-living, cartoon)
+  - Cutouts get knocked over and slide off the road when hit
+  - No speech/messages are shown
+  - Police cars still cause game over
+  - Collectibles remain bottles (you can rename to "fuel" as desired)
+*/
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-
-const hudBottles = document.getElementById("bottles");
-const hudMeters = document.getElementById("meters");
 
 const W = canvas.width;
 const H = canvas.height;
 
-// Road
-const ROAD_Y = H * 0.55;
-const ROAD_HEIGHT = H - ROAD_Y;
+const ROAD_Y = H * 0.58;
+const ROAD_H = H - ROAD_Y;
+
+const hudBottles = document.getElementById("bottles");
+const hudMeters = document.getElementById("meters");
+const restartBtn = document.getElementById("restart");
 
 let last = 0;
-let playing = false;
+let running = false;
 
 let truck = {
   x: 120,
-  y: ROAD_Y + ROAD_HEIGHT/2 - 40,
-  w: 110,
+  y: ROAD_Y + ROAD_H/2 - 40,
+  w: 95,
   h: 55,
-  vy: 0
+  vy: 0,
+  maxSpeed: 520
 };
 
 let objects = [];
@@ -50,212 +67,305 @@ let keys = {};
 
 let bottleCount = 0;
 let meters = 0;
+let baseSpeed = 240;
+let boost = 0;
 
-let baseSpeed = 220;
-let bonusSpeed = 0;
-
-function start() {
-  objects = [];
-  bottleCount = 0;
-  meters = 0;
-  bonusSpeed = 0;
-
-  truck.y = ROAD_Y + ROAD_HEIGHT/2 - 40;
-
-  playing = true;
-  last = performance.now();
-  requestAnimationFrame(loop);
-}
-
-// Draw truck (simple 2D cartoon truck)
-function drawTruck() {
+// ---------- draw helpers ----------
+function drawTruck(t){
+  // simple pixel-ish truck: wheels, cab, trailer
   // wheels
   ctx.fillStyle = "#222";
-  ctx.fillRect(truck.x + 10, truck.y + truck.h - 10, 30, 10);
-  ctx.fillRect(truck.x + 70, truck.y + truck.h - 10, 30, 10);
+  ctx.fillRect(t.x + 8, t.y + t.h - 10, 34, 10);
+  ctx.fillRect(t.x + 58, t.y + t.h - 10, 34, 10);
 
   // cab
-  ctx.fillStyle = "#ff5252";
-  ctx.fillRect(truck.x, truck.y, truck.w * 0.6, truck.h);
+  ctx.fillStyle = "#ff5757";
+  roundRect(ctx, t.x, t.y, t.w * 0.62, t.h, 6, true, false);
 
   // window
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(truck.x + truck.w*0.38, truck.y + 10, 34, 22);
+  ctx.fillStyle = "#dff6ff";
+  roundRect(ctx, t.x + t.w*0.38, t.y + 8, 36, 22, 4, true, false);
 
   // trailer
-  ctx.fillStyle = "#e84343";
-  ctx.fillRect(truck.x + truck.w*0.55, truck.y + 5, truck.w*0.50, truck.h - 10);
+  ctx.fillStyle = "#e04444";
+  roundRect(ctx, t.x + t.w*0.6, t.y + 6, t.w*0.44, t.h - 12, 6, true, false);
 }
 
-// Stick figure "kid" (cartoon, harmless)
-function drawKid(o) {
-  ctx.strokeStyle = "yellow";
-  ctx.lineWidth = 3;
+// rounded rectangle helper
+function roundRect(ctx, x, y, w, h, r, fill, stroke){
   ctx.beginPath();
-  ctx.arc(o.x + o.w/2, o.y + 10, 10, 0, Math.PI*2);
-  ctx.moveTo(o.x + o.w/2, o.y + 20);
-  ctx.lineTo(o.x + o.w/2, o.y + 45);
-  ctx.lineTo(o.x + o.w/2 - 12, o.y + 65);
-  ctx.moveTo(o.x + o.w/2, o.y + 45);
-  ctx.lineTo(o.x + o.w/2 + 12, o.y + 65);
-  ctx.stroke();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+  if(fill){ ctx.fill(); }
+  if(stroke){ ctx.stroke(); }
 }
 
-// Police car (simple cartoon)
-function drawPolice(o) {
-  ctx.fillStyle = "#1e1e90";
-  ctx.fillRect(o.x, o.y, o.w, o.h);
+// ---------- cardboard cutout (non-living) ----------
+function drawCutout(o){
+  // simple stylized cardboard cutout: rectangular body with printed "person" silhouette
+  ctx.save();
+  ctx.translate(o.x, o.y);
 
-  ctx.fillStyle = "white";
-  ctx.fillRect(o.x + 8, o.y + 10, o.w - 16, o.h - 20);
+  // stand shadow
+  ctx.fillStyle = "rgba(0,0,0,0.15)";
+  ctx.fillRect(6, o.h - 6, o.w - 10, 6);
 
-  // light bar
+  // cardboard base
+  ctx.fillStyle = "#d7c09a"; // cardboard color
+  roundRect(ctx, 0, 0, o.w, o.h, 4, true, false);
+
+  // printed silhouette (non-detailed)
+  ctx.fillStyle = "#5a5a5a";
+  // head
+  ctx.beginPath();
+  ctx.arc(o.w/2, 14, 8, 0, Math.PI*2);
+  ctx.fill();
+  // torso
+  ctx.fillRect(o.w/2 - 8, 28, 16, 22);
+  // legs (printed)
+  ctx.fillRect(o.w/2 - 10, 48, 6, 14);
+  ctx.fillRect(o.w/2 + 4, 48, 6, 14);
+
+  ctx.restore();
+}
+
+// ---------- police car ----------
+function drawPolice(o){
+  ctx.save();
+  ctx.translate(o.x, o.y);
+
+  ctx.fillStyle = "#1b2a9a";
+  roundRect(ctx, 0, 0, o.w, o.h, 5, true, false);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(8, 8, o.w - 16, o.h - 18);
+
+  // lightbar
   ctx.fillStyle = "red";
-  ctx.fillRect(o.x + 10, o.y - 6, 20, 6);
+  ctx.fillRect(10, -6, 18, 6);
   ctx.fillStyle = "blue";
-  ctx.fillRect(o.x + 40, o.y - 6, 20, 6);
+  ctx.fillRect(40, -6, 18, 6);
+
+  ctx.restore();
 }
 
-// Bottle
-function drawBottle(o) {
-  ctx.fillStyle = "#3fcf5f";
-  ctx.fillRect(o.x, o.y, o.w, o.h);
-  ctx.fillStyle = "white";
-  ctx.fillRect(o.x + 4, o.y + 12, o.w - 8, 8);
+// ---------- bottle ----------
+function drawBottle(o){
+  ctx.fillStyle = "#3cff7a";
+  roundRect(ctx, o.x, o.y, o.w, o.h, 4, true, false);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(o.x + 4, o.y + 12, o.w - 8, 6);
 }
 
-function spawn() {
-  const type = Math.random();
-
-  if (type < 0.15) {
+// ---------- spawning ----------
+function spawn(){
+  const r = Math.random();
+  if (r < 0.14){
     // bottle
     objects.push({
-      kind:"bottle",
-      x:W + 20,
-      y: ROAD_Y + Math.random() * (ROAD_HEIGHT - 50),
-      w: 20,
-      h: 35,
-      speed: baseSpeed + Math.random()*80
+      kind: "bottle",
+      x: W + 20,
+      y: ROAD_Y + Math.random() * (ROAD_H - 50),
+      w: 20, h: 35,
+      speed: baseSpeed + Math.random() * 80
     });
-  }
-  else if (type < 0.55) {
-    // kid
+  } else if (r < 0.62){
+    // cardboard cutout
     objects.push({
-      kind:"kid",
-      x:W + 20,
-      y: ROAD_Y + Math.random() * (ROAD_HEIGHT - 70),
-      w: 30,
-      h: 70,
-      speed: baseSpeed + Math.random()*80
+      kind: "cutout",
+      x: W + 20,
+      y: ROAD_Y + Math.random() * (ROAD_H - 70),
+      w: 36, h: 72,
+      knocked: false,
+      speed: baseSpeed + Math.random() * 60
     });
-  }
-  else {
+  } else {
     // police car
     objects.push({
-      kind:"police",
-      x:W + 20,
-      y: ROAD_Y + Math.random() * (ROAD_HEIGHT - 50),
-      w: 70,
-      h: 40,
-      speed: baseSpeed + Math.random()*80
+      kind: "police",
+      x: W + 20,
+      y: ROAD_Y + Math.random() * (ROAD_H - 50),
+      w: 70, h: 40,
+      speed: baseSpeed + Math.random() * 70
     });
   }
 }
 
-function collide(a,b) {
-  return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h);
+function rectsIntersect(a,b){
+  return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
 }
 
-function loop(t) {
-  if (!playing) return;
+// ---------- main loop ----------
+let spawnTimer = 0;
+function loop(ts){
+  if (!running) return;
+  const dt = Math.min(40, ts - last) / 1000;
+  last = ts;
 
-  let dt = (t - last) / 1000;
-  last = t;
+  // input
+  if (keys["ArrowUp"] || keys["w"]) truck.y -= 260 * dt;
+  if (keys["ArrowDown"] || keys["s"]) truck.y += 260 * dt;
 
-  // INPUT
-  if (keys["ArrowUp"] || keys["w"]) truck.y -= 240 * dt;
-  if (keys["ArrowDown"] || keys["s"]) truck.y += 240 * dt;
-
-  // clamp to road
-  const top = ROAD_Y + 5;
-  const bottom = ROAD_Y + ROAD_HEIGHT - truck.h - 5;
+  // clamp on road
+  const top = ROAD_Y + 6;
+  const bottom = ROAD_Y + ROAD_H - truck.h - 6;
   truck.y = Math.max(top, Math.min(bottom, truck.y));
 
-  // spawn
-  if (Math.random() < 0.02) spawn();
+  // spawn logic
+  spawnTimer += dt * 1000;
+  if (spawnTimer > 800) { spawnTimer = 0; if (Math.random() < 0.95) spawn(); }
 
-  // Update objects
-  const spd = baseSpeed + bonusSpeed;
+  const effectiveSpeed = baseSpeed + boost;
 
-  for (let i = objects.length - 1; i >= 0; i--) {
-    let o = objects[i];
-    o.x -= o.speed * dt;
+  // update objects
+  for (let i = objects.length - 1; i >= 0; i--){
+    const o = objects[i];
 
-    // collision
-    if (collide(truck, o)) {
-      if (o.kind === "bottle") {
+    // if cutout is knocked, it slides slower and eventually is removed
+    if (o.kind === "cutout" && o.knocked){
+      o.x -= 90 * dt; // knocked slide speed
+      o.y += 20 * dt; // slight drop to simulate slide
+    } else {
+      o.x -= (o.speed || effectiveSpeed) * dt;
+    }
+
+    // collisions
+    const truckRect = { x: truck.x, y: truck.y, w: truck.w, h: truck.h };
+    const objRect = { x: o.x, y: o.y, w: o.w, h: o.h };
+
+    if (rectsIntersect(truckRect, objRect)){
+      if (o.kind === "bottle"){
         bottleCount++;
-        bonusSpeed += 80;
+        boost += 90;
+        // slightly shorten spawn frequency for pacing
         objects.splice(i,1);
         continue;
-      } else {
-        // hit kid or police => game ends
-        alert("Game Over!\nBottles: " + bottleCount + "\nDistance: " + Math.floor(meters));
-        playing = false;
+      }
+
+      if (o.kind === "cutout"){
+        if (!o.knocked){
+          // mark knocked and alter its behavior — no message, no harm
+          o.knocked = true;
+          // reduce its width/height visually a little
+          // it will slide off the screen and then be removed normally
+        }
+      }
+
+      if (o.kind === "police"){
+        // game over: police catch you
+        running = false;
+        setTimeout(()=> {
+          alert("Game Over — Police caught your truck.\nBottles: " + bottleCount + "\nDistance: " + Math.floor(meters) + " m");
+        }, 10);
         return;
       }
     }
 
-    // remove old
-    if (o.x < -200) objects.splice(i,1);
+    // remove off-screen
+    if (o.x + o.w < -120 || o.y > H + 60) objects.splice(i,1);
   }
 
   // decay boost
-  bonusSpeed = Math.max(0, bonusSpeed - 90 * dt);
+  boost = Math.max(0, boost - 120 * dt);
 
-  // meters
-  meters += spd * dt / 40;
+  // metres: convert px to metres with a scaling factor
+  const pxPerMetre = 40;
+  meters += (effectiveSpeed * dt) / pxPerMetre;
 
-  // HUD update
+  // render
+  render(ts);
+
+  // update HUD
   hudBottles.textContent = bottleCount;
   hudMeters.textContent = Math.floor(meters);
-
-  // DRAW
-  ctx.clearRect(0,0,W,H);
-
-  // sky
-  ctx.fillStyle = "#7faac9";
-  ctx.fillRect(0,0,W,H);
-
-  // road
-  ctx.fillStyle = "#333";
-  ctx.fillRect(0,ROAD_Y,W,ROAD_HEIGHT);
-
-  // lane stripes
-  ctx.fillStyle = "yellow";
-  let offset = (t * 0.1) % 40;
-  for (let x = -offset; x < W; x += 40) {
-    ctx.fillRect(x, ROAD_Y + ROAD_HEIGHT/2 - 4, 24, 8);
-  }
-
-  // truck
-  drawTruck();
-
-  // objects
-  objects.forEach(o => {
-    if (o.kind === "kid") drawKid(o);
-    else if (o.kind === "police") drawPolice(o);
-    else drawBottle(o);
-  });
 
   requestAnimationFrame(loop);
 }
 
-window.addEventListener("keydown", e => { keys[e.key] = true; });
-window.addEventListener("keyup", e => { keys[e.key] = false; });
+function render(ts){
+  // clear
+  ctx.clearRect(0,0,W,H);
 
-start();
+  // sky
+  ctx.fillStyle = "#79a7c6";
+  ctx.fillRect(0,0,W,H);
+
+  // distant hills (simple)
+  ctx.fillStyle = "#6fa0b6";
+  ctx.fillRect(0, H*0.08, W, H*0.12);
+
+  // road
+  ctx.fillStyle = "#333";
+  ctx.fillRect(0, ROAD_Y, W, ROAD_H);
+
+  // center dashed line
+  ctx.fillStyle = "#f2d84a";
+  const dashW = 28, dashGap = 22;
+  const offset = (ts * 0.08) % (dashW + dashGap);
+  for (let x = -offset; x < W; x += dashW + dashGap){
+    ctx.fillRect(x + 34, ROAD_Y + ROAD_H/2 - 6, dashW, 12);
+  }
+
+  // sidewalk stripes
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, ROAD_Y, 20, 6);
+  ctx.fillRect(W - 20, ROAD_Y, 20, 6);
+
+  // draw truck
+  drawTruck(truck);
+
+  // draw objects
+  objects.forEach(o=>{
+    if (o.kind === "bottle") drawBottle(o);
+    else if (o.kind === "cutout") drawCutout(o);
+    else if (o.kind === "police") drawPolice(o);
+  });
+
+  // small speed bar
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillRect(W - 170, 14, 160, 8);
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  const fraction = Math.min(1, (baseSpeed + boost) / truck.maxSpeed);
+  ctx.fillRect(W - 170, 14, 160 * fraction, 8);
+  ctx.fillStyle = "white";
+  ctx.font = "12px sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText("Speed", W - 10, 10 + 12);
+}
+
+// input
+window.addEventListener("keydown", e=>{
+  if (["ArrowUp","ArrowDown","w","s"].includes(e.key)){
+    e.preventDefault();
+  }
+  keys[e.key] = true;
+});
+window.addEventListener("keyup", e=>{ keys[e.key] = false; });
+
+// start / restart
+function startGame(){
+  objects = [];
+  bottleCount = 0;
+  meters = 0;
+  boost = 0;
+  truck.y = ROAD_Y + ROAD_H/2 - 40;
+  running = true;
+  last = performance.now();
+  spawnTimer = 0;
+  requestAnimationFrame(loop);
+}
+
+restartBtn.addEventListener("click", () => {
+  startGame();
+});
+
+// auto-start
+startGame();
+
 </script>
-
 </body>
 </html>
