@@ -1,368 +1,75 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Truck Rush — Simple 2D Sidescroller</title>
+<meta charset="utf-8">
+<title>Truck Road Dodge</title>
 <style>
-  :root{
-    --bg:#88c0d0;
-    --road:#333;
-    --line:#f5e26b;
-    --truck:#ff6b6b;
-    --obstacle:#1f2430;
-    --bottle:#5ee88b;
-    --panel: rgba(0,0,0,0.6);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  }
-  html,body{height:100%;margin:0;background:var(--bg);}
-  #gameWrap{display:flex;flex-direction:column;align-items:center;padding:20px 10px;gap:12px;}
-  canvas{background:linear-gradient(#7fb7d0,#6aa6c6);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.25);}
-  .hud{
-    width: 900px; max-width:calc(100% - 20px);
-    display:flex;justify-content:space-between;align-items:center;
-    color:white;padding:8px 12px;border-radius:8px;background:var(--panel);
-    font-weight:600;letter-spacing:0.6px;
-  }
-  .controls{font-size:13px;opacity:0.9}
-  .center {
-    display:flex;flex-direction:column;align-items:center;gap:8px;
-  }
-  button{
-    background:#2b2f3a;color:white;border:0;padding:8px 12px;border-radius:8px;
-    cursor:pointer;font-weight:600;
-  }
-  small{opacity:0.9;color:#f0f0f0}
-  #overlay{
-    position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;
-    justify-content:center;pointer-events:none;
-  }
-  .message{
-    background:rgba(0,0,0,0.65);color:white;padding:18px 22px;border-radius:10px;text-align:center;
-    pointer-events:auto;
-  }
-  a.link{color:#cfefff;text-decoration:underline}
-  @media (max-width:640px){
-    .hud{font-size:13px}
-    button{padding:7px 10px}
-  }
+  body { background:#88c0d0; margin:0; font-family:sans-serif; }
+  #hud { position:absolute; top:10px; left:10px; color:white;
+         background:rgba(0,0,0,0.5); padding:10px 14px; border-radius:8px; }
+  canvas { display:block; margin:60px auto; background:#7faac9;
+           border-radius:10px; box-shadow:0 0 10px rgba(0,0,0,0.4); }
 </style>
 </head>
 <body>
-<div id="gameWrap" style="position:relative;">
-  <div class="hud" id="hud">
-    <div>
-      Bottles: <span id="bottleCount">0</span>
-      &nbsp;&nbsp;|&nbsp;&nbsp;
-      Metres: <span id="metres">0</span>
-    </div>
-    <div class="controls">
-      Move: ↑↓ or W/S &nbsp; • &nbsp; Avoid obstacles & collect bottles to speed up
-    </div>
-  </div>
 
-  <div class="center">
-    <canvas id="game" width="900" height="420"></canvas>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button id="startBtn">Start / Restart</button>
-      <small>Tip: each bottle increases speed briefly. Distance counts while moving.</small>
-    </div>
-  </div>
-
-  <div id="overlay"></div>
+<div id="hud">
+  Bottles: <span id="bottles">0</span> &nbsp; | &nbsp;
+  Metres: <span id="meters">0</span>
 </div>
 
+<canvas id="game" width="900" height="450"></canvas>
+
 <script>
-(() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d', { alpha: false });
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
 
-  // HUD
-  const bottleEl = document.getElementById('bottleCount');
-  const metresEl = document.getElementById('metres');
-  const startBtn = document.getElementById('startBtn');
-  const overlay = document.getElementById('overlay');
+const hudBottles = document.getElementById("bottles");
+const hudMeters = document.getElementById("meters");
 
-  // Game constants (tweak these)
-  const WIDTH = canvas.width;
-  const HEIGHT = canvas.height;
-  const ROAD_Y = HEIGHT * 0.55;
-  const ROAD_HEIGHT = HEIGHT - ROAD_Y;
-  const LANE_PADDING = 18;
-  const MIN_Y = 30;
-  const MAX_Y = ROAD_Y - 40;
-  const TRUCK_WIDTH = 90;
-  const TRUCK_HEIGHT = 48;
+const W = canvas.width;
+const H = canvas.height;
 
-  // Game state
-  let playing = false;
-  let lastTime = 0;
-  let spawnTimer = 0;
-  let spawnInterval = 1100; // ms
-  let objs = []; // obstacles and bottles
-  let bottleCount = 0;
-  let metres = 0;
-  let worldSpeed = 250; // pixels per second baseline
-  let speedBonus = 0; // additional speed from bottles (decays)
-  let truck;
+// Road
+const ROAD_Y = H * 0.55;
+const ROAD_HEIGHT = H - ROAD_Y;
 
-  // Input
-  const keys = { ArrowUp:false, ArrowDown:false, w:false, s:false };
+let last = 0;
+let playing = false;
 
-  function init() {
-    truck = {
-      x: 100,
-      y: ROAD_Y - TRUCK_HEIGHT - 10,
-      w: TRUCK_WIDTH,
-      h: TRUCK_HEIGHT,
-      vy: 0,
-      maxSpeed: 540
-    };
-    objs = [];
-    bottleCount = 0;
-    metres = 0;
-    worldSpeed = 250;
-    speedBonus = 0;
-    spawnInterval = 1100;
-    spawnTimer = 0;
-    lastTime = performance.now();
-    updateHUD();
-  }
+let truck = {
+  x: 120,
+  y: ROAD_Y + ROAD_HEIGHT/2 - 40,
+  w: 110,
+  h: 55,
+  vy: 0
+};
 
-  function startGame() {
-    init();
-    playing = true;
-    overlay.innerHTML = '';
-    lastTime = performance.now();
-    requestAnimationFrame(loop);
-  }
+let objects = [];
+let keys = {};
 
-  function gameOver() {
-    playing = false;
-    showOverlay(`Game Over<br>Bottles: ${bottleCount} · Distance: ${Math.floor(metres)} m<br><button id="replay">Play Again</button>`);
-    document.getElementById('replay').addEventListener('click', () => startGame());
-  }
+let bottleCount = 0;
+let meters = 0;
 
-  function showOverlay(html) {
-    overlay.innerHTML = `<div class="message">${html}</div>`;
-  }
+let baseSpeed = 220;
+let bonusSpeed = 0;
 
-  function updateHUD() {
-    bottleEl.textContent = bottleCount;
-    metresEl.textContent = Math.floor(metres);
-  }
+function start() {
+  objects = [];
+  bottleCount = 0;
+  meters = 0;
+  bonusSpeed = 0;
 
-  function spawn(type) {
-    // type: "obstacle" or "bottle"
-    const gapTop = 80;
-    const gapBottom = ROAD_Y - 40;
-    const y = Math.random() * (gapBottom - gapTop) + gapTop;
-    const speed = worldSpeed + Math.random() * 40;
-    if (type === 'obstacle') {
-      objs.push({
-        kind:'obstacle',
-        x: WIDTH + 20,
-        y,
-        w: 48 + Math.round(Math.random() * 36),
-        h: 36 + Math.round(Math.random() * 36),
-        speed
-      });
-    } else {
-      objs.push({
-        kind:'bottle',
-        x: WIDTH + 20,
-        y,
-        w: 26,
-        h: 40,
-        speed
-      });
-    }
-  }
+  truck.y = ROAD_Y + ROAD_HEIGHT/2 - 40;
 
-  function rectsIntersect(a,b){
-    return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
-  }
+  playing = true;
+  last = performance.now();
+  requestAnimationFrame(loop);
+}
 
-  function loop(ts) {
-    if (!playing) return;
-    const dt = Math.min(40, ts - lastTime); // cap delta to 40ms to avoid big jumps
-    lastTime = ts;
-
-    // input -> vertical movement
-    const moveSpeed = 280; // vertical pixels per second
-    let vy = 0;
-    if (keys.ArrowUp || keys.w) vy = -moveSpeed;
-    if (keys.ArrowDown || keys.s) vy = moveSpeed;
-    truck.y += vy * (dt/1000);
-    // clamp
-    truck.y = Math.max(MIN_Y, Math.min(MAX_Y, truck.y));
-
-    // spawn logic (adjust spawn by speed: faster -> closer obstacles)
-    spawnTimer += dt;
-    const adjustedInterval = Math.max(520, spawnInterval - (worldSpeed - 250) * 1.2);
-    if (spawnTimer > adjustedInterval) {
-      spawnTimer = 0;
-      // decide whether bottle or obstacle
-      if (Math.random() < 0.15) spawn('bottle');
-      else spawn('obstacle');
-    }
-
-    // update objects
-    const effectiveSpeed = worldSpeed + speedBonus;
-    for (let i = objs.length - 1; i >= 0; i--) {
-      const o = objs[i];
-      o.x -= (o.speed || effectiveSpeed) * (dt/1000);
-      // check collision with truck
-      const truckRect = { x:truck.x, y:truck.y, w:truck.w, h:truck.h };
-      const objRect = { x:o.x, y:o.y, w:o.w, h:o.h };
-      if (rectsIntersect(truckRect, objRect)) {
-        if (o.kind === 'obstacle') {
-          gameOver();
-          return;
-        } else if (o.kind === 'bottle') {
-          bottleCount++;
-          // apply speed bonus
-          speedBonus += 90; // instant boost in px/s
-          // also shorten spawn interval slightly
-          spawnInterval = Math.max(520, spawnInterval - 18);
-          objs.splice(i,1);
-          updateHUD();
-          continue;
-        }
-      }
-      // remove when far off-screen
-      if (o.x + o.w < -50) objs.splice(i,1);
-    }
-
-    // decay speedBonus over time
-    speedBonus = Math.max(0, speedBonus - 220 * (dt/1000)); // decays by px/s per second
-
-    // metres travelled increments by effective ground speed (converted to metres)
-    // convert pixel speed to metres: assume 40 px = 1 metre (arbitrary scaling)
-    const pxPerMetre = 40;
-    metres += (effectiveSpeed * (dt/1000)) / pxPerMetre;
-
-    updateHUD();
-    render();
-    requestAnimationFrame(loop);
-  }
-
-  function drawRoundedRect(x,y,w,h,r){
-    ctx.beginPath();
-    ctx.moveTo(x+r,y);
-    ctx.arcTo(x+w,y,x+w,y+h,r);
-    ctx.arcTo(x+w,y+h,x,y+h,r);
-    ctx.arcTo(x,y+h,x,y,r);
-    ctx.arcTo(x,y,x+w,y,r);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  function render() {
-    // clear
-    ctx.clearRect(0,0,WIDTH,HEIGHT);
-
-    // sky handled by canvas background; draw distant hills (simple)
-    ctx.fillStyle = '#5fa1b9';
-    ctx.fillRect(0,0,WIDTH,HEIGHT*0.45);
-
-    // road
-    ctx.fillStyle = '#2c2c2c';
-    ctx.fillRect(0, ROAD_Y, WIDTH, ROAD_HEIGHT);
-
-    // dashed center line moving to simulate motion
-    const lineH = 8;
-    const spacing = 28;
-    const offset = (lastTime/10) % (lineH+spacing);
-    ctx.fillStyle = '#f5e26b';
-    for (let x = -offset; x < WIDTH; x += lineH + spacing) {
-      ctx.fillRect(x + 30, ROAD_Y + ROAD_HEIGHT/2 - 6, lineH, 12);
-    }
-
-    // roadside stripes
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, ROAD_Y, 20, 6);
-    ctx.fillRect(WIDTH-20, ROAD_Y, 20, 6);
-
-    // draw truck (simple rectangle + wheels + window)
-    ctx.save();
-    // shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.fillRect(truck.x + 8, truck.y + truck.h - 2, truck.w - 12, 8);
-
-    // body
-    ctx.fillStyle = '--truck';
-    ctx.fillStyle = '#ff6b6b';
-    drawRoundedRect(truck.x, truck.y, truck.w, truck.h, 8);
-
-    // cab window
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    drawRoundedRect(truck.x + truck.w - 36, truck.y + 8, 24, 18, 4);
-    ctx.restore();
-
-    // draw objects
-    objs.forEach(o => {
-      if (o.kind === 'obstacle') {
-        ctx.fillStyle = '#1f2430';
-        drawRoundedRect(o.x, o.y, o.w, o.h, 6);
-        // hazard stripes
-        ctx.fillStyle = 'rgba(255,255,255,0.06)';
-        for (let i=0;i<o.h;i+=8){
-          ctx.fillRect(o.x+i%6, o.y+i, o.w/6, 2);
-        }
-      } else if (o.kind === 'bottle') {
-        // bottle green body
-        ctx.fillStyle = '#3fbf7f';
-        const bw = o.w, bh = o.h;
-        drawRoundedRect(o.x, o.y, bw, bh, 6);
-        // label
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.fillRect(o.x + bw*0.25, o.y + bh*0.4, bw*0.5, bh*0.15);
-        // cap
-        ctx.fillStyle = '#2b2b2b';
-        ctx.fillRect(o.x + bw*0.36, o.y - 6, bw*0.28, 6);
-      }
-    });
-
-    // small speed indicator
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
-    ctx.fillRect(WIDTH - 160, 14, 150, 6);
-    const fraction = Math.min(1, (worldSpeed + speedBonus) / truck.maxSpeed);
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillRect(WIDTH - 160, 14, 150 * fraction, 6);
-    ctx.fillStyle = 'white';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('Speed', WIDTH - 10, 10 + 12);
-  }
-
-  // input listeners
-  window.addEventListener('keydown', e => {
-    if (e.key === 'ArrowUp') keys.ArrowUp = true;
-    if (e.key === 'ArrowDown') keys.ArrowDown = true;
-    if (e.key === 'w' || e.key === 'W') keys.w = true;
-    if (e.key === 's' || e.key === 'S') keys.s = true;
-    // prevent scrolling
-    if (['ArrowUp','ArrowDown','w','W','s','S'].includes(e.key)) e.preventDefault();
-  }, {passive:false});
-
-  window.addEventListener('keyup', e => {
-    if (e.key === 'ArrowUp') keys.ArrowUp = false;
-    if (e.key === 'ArrowDown') keys.ArrowDown = false;
-    if (e.key === 'w' || e.key === 'W') keys.w = false;
-    if (e.key === 's' || e.key === 'S') keys.s = false;
-  });
-
-  // Start button
-  startBtn.addEventListener('click', () => startGame());
-
-  // initialize and draw an attract screen
-  init();
-  render();
-  showOverlay(`<strong>Truck Rush</strong><br>Avoid obstacles and collect bottles to speed up.<br><button id="playNow">Play</button>`);
-  document.getElementById('playNow').addEventListener('click', () => startGame());
-
-})();
-</script>
-</body>
-</html>
+// Draw truck (simple 2D cartoon truck)
+function drawTruck() {
+  // wheels
+  ctx.fillStyle = "#222";
+  ctx.fillRect(truck.x + 10, truck.y + truck.h - 10, 30, 10);
+  ctx.fillRect(truck.x + 70, truck.y + truck.h -
